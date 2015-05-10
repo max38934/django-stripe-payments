@@ -635,9 +635,9 @@ class AbstractPlan(models.Model):
     @property
     def currency_symbol(self):
         if 'euro' == self.currency:
-            return "€"
+            return "&#8364;"
         elif 'gbp' == self.currency:
-            return "£"
+            return "&#163;"
         else:
             return "$"
 
