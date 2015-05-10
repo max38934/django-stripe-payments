@@ -15,7 +15,6 @@ PLAN_CHOICES = [
     (plan, PAYMENTS_PLANS[plan].get("name", plan))
     for plan in PAYMENTS_PLANS
 ]
-DEFAULT_PLAN_MODEL = get_plan_model()
 TRIAL_PERIOD_FOR_USER_CALLBACK = getattr(
     settings,
     "PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACK",

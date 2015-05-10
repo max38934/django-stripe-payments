@@ -19,7 +19,6 @@ from jsonfield.fields import JSONField
 
 from .managers import CustomerManager, ChargeManager, TransferManager
 from .settings import (
-    DEFAULT_PLAN_MODEL,
     INVOICE_FROM_EMAIL,
     plan_from_stripe_id,
     SEND_EMAIL_RECEIPTS,
@@ -37,9 +36,10 @@ from .utils import (
     convert_tstamp,
     convert_amount_for_db,
     convert_amount_for_api,
+    get_plan_model,
 )
 
-
+STRIPE_PLAN_MODEL_PATH = getattr(settings, "STRIPE_PLAN_MODEL", "payments.Plan")
 stripe.api_key = settings.STRIPE_SECRET_KEY
 stripe.api_version = getattr(settings, "STRIPE_API_VERSION", "2012-11-07")
 
@@ -375,7 +375,7 @@ class Customer(StripeObject):
     def create(cls, user, card=None, plan=None, charge_immediately=True):
 
         if card and plan:
-            plan = DEFAULT_PLAN_MODEL.objects.get(name=plan).stripe_id
+            plan = get_plan_model().objects.get(name=plan).stripe_id
         else:
             plan = None
 
@@ -556,7 +556,7 @@ class Customer(StripeObject):
         if token:
             subscription_params["card"] = token
 
-        subscription_params["plan"] = DEFAULT_PLAN_MODEL.objects.get(name=plan).stripe_id
+        subscription_params["plan"] = get_plan_model().objects.get(name=plan).stripe_id
         subscription_params["quantity"] = quantity
         subscription_params["coupon"] = coupon
         resp = cu.update_subscription(**subscription_params)
@@ -673,7 +673,7 @@ class CurrentSubscription(models.Model):
         related_name="current_subscription",
         null=True
     )
-    plan = models.ForeignKey(DEFAULT_PLAN_MODEL)
+    plan = models.ForeignKey(STRIPE_PLAN_MODEL_PATH)
     quantity = models.IntegerField()
     start = models.DateTimeField()
     # trialing, active, past_due, canceled, or unpaid
@@ -862,7 +862,7 @@ class InvoiceItem(models.Model):
     proration = models.BooleanField(default=False)
     line_type = models.CharField(max_length=50)
     description = models.CharField(max_length=200, blank=True)
-    plan = models.ForeignKey(DEFAULT_PLAN_MODEL)
+    plan = models.ForeignKey(STRIPE_PLAN_MODEL_PATH)
     quantity = models.IntegerField(null=True)
 
     def plan_display(self):
