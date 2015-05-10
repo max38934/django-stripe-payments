@@ -1,7 +1,7 @@
 import six
 from django.conf import settings
 
-from .utils import load_path_attr
+from .utils import load_path_attr, get_plan_model
 
 
 STRIPE_PUBLIC_KEY = settings.STRIPE_PUBLIC_KEY
@@ -15,11 +15,7 @@ PLAN_CHOICES = [
     (plan, PAYMENTS_PLANS[plan].get("name", plan))
     for plan in PAYMENTS_PLANS
 ]
-DEFAULT_PLAN = getattr(
-    settings,
-    "PAYMENTS_DEFAULT_PLAN",
-    None
-)
+DEFAULT_PLAN_MODEL = get_plan_model()
 TRIAL_PERIOD_FOR_USER_CALLBACK = getattr(
     settings,
     "PAYMENTS_TRIAL_PERIOD_FOR_USER_CALLBACK",

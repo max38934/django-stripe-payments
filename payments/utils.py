@@ -3,6 +3,8 @@ import decimal
 
 from django.core.exceptions import ImproperlyConfigured
 from django.utils import importlib, timezone
+from django.apps import apps as django_apps
+from django.conf import settings
 
 
 def convert_tstamp(response, field_name=None):
@@ -65,3 +67,15 @@ def convert_amount_for_db(amount, currency="usd"):
 
 def convert_amount_for_api(amount, currency="usd"):
     return int(amount * 100) if currency.lower() not in ZERO_DECIMAL_CURRENCIES else int(amount)
+
+
+def get_plan_model():
+    """
+    Returns the Plan model that is active in this project.
+    """
+    try:
+        return django_apps.get_model(getattr(settings, "STRIPE_PLAN_MODEL", "payments.Plan"))
+    except ValueError:
+        raise ImproperlyConfigured("AUTH_USER_MODEL must be of the form 'app_label.model_name'")
+    except LookupError:
+        raise ImproperlyConfigured("AUTH_USER_MODEL refers to model '%s' that has not been installed" % settings.STRIPE_PLAN_MODEL)

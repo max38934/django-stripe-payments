@@ -19,9 +19,8 @@ from jsonfield.fields import JSONField
 
 from .managers import CustomerManager, ChargeManager, TransferManager
 from .settings import (
-    DEFAULT_PLAN,
+    DEFAULT_PLAN_MODEL,
     INVOICE_FROM_EMAIL,
-    PAYMENTS_PLANS,
     plan_from_stripe_id,
     SEND_EMAIL_RECEIPTS,
     TRIAL_PERIOD_FOR_USER_CALLBACK,
@@ -376,9 +375,7 @@ class Customer(StripeObject):
     def create(cls, user, card=None, plan=None, charge_immediately=True):
 
         if card and plan:
-            plan = PAYMENTS_PLANS[plan]["stripe_plan_id"]
-        elif DEFAULT_PLAN:
-            plan = PAYMENTS_PLANS[DEFAULT_PLAN]["stripe_plan_id"]
+            plan = DEFAULT_PLAN_MODEL.objects.get(name=plan).stripe_id
         else:
             plan = None
 
@@ -392,7 +389,7 @@ class Customer(StripeObject):
         stripe_customer = stripe.Customer.create(
             email=user.email,
             card=card,
-            plan=plan or DEFAULT_PLAN,
+            plan=plan,
             trial_end=trial_end
         )
 
@@ -559,7 +556,7 @@ class Customer(StripeObject):
         if token:
             subscription_params["card"] = token
 
-        subscription_params["plan"] = PAYMENTS_PLANS[plan]["stripe_plan_id"]
+        subscription_params["plan"] = DEFAULT_PLAN_MODEL.objects.get(name=plan).stripe_id
         subscription_params["quantity"] = quantity
         subscription_params["coupon"] = coupon
         resp = cu.update_subscription(**subscription_params)
@@ -603,6 +600,72 @@ class Customer(StripeObject):
         return Charge.sync_from_stripe_data(data)
 
 
+class AbstractPlan(models.Model):
+
+    CURRENCY_CHOICES = (
+        ('gbp', 'Pounds'),
+        ('eur', 'Euro'),
+        ('usd', 'Dollars'),
+    )
+
+    MONTHLY, YEARLY, WEEKLY = 'month', 'week', 'year'
+    INTERVAL_CHOICES = (
+        (MONTHLY, 'Monthly'),
+        (YEARLY, 'Yearly'),
+        (WEEKLY, 'Weekly'),
+    )
+
+    stripe_id = models.CharField(max_length=255, unique=True)
+    name = models.CharField(max_length=255, unique=True)
+    currency = models.CharField(choices=CURRENCY_CHOICES, max_length=10, default='usd')
+    amount = models.DecimalField(max_digits=8, decimal_places=2, default=decimal.Decimal('0.00'))
+    interval = models.CharField(max_length=32, choices=INTERVAL_CHOICES, default=MONTHLY)
+
+    class Meta:
+        abstract = True
+        swappable = 'PLAN_MODEL'
+
+    def __unicode__(self):
+        return unicode(self.name)
+
+    @property
+    def amount_in_cents(self):
+        return int(self.amount * 100)
+
+    @property
+    def currency_symbol(self):
+        if 'euro' == self.currency:
+            return "€"
+        elif 'gbp' == self.currency:
+            return "£"
+        else:
+            return "$"
+
+    def save(self, update=True, *args, **kwargs):
+
+        if update:
+            if self.stripe_id and self.pk:
+                p = stripe.Plan.retrieve(self.stripe_id)
+                p.name = self.name
+                p.save()
+            else:
+                stripe_plan = stripe.Plan.create(
+                    amount=self.amount_in_cents,
+                    interval=self.interval,
+                    name=self.name,
+                    currency=self.currency,
+                    id=self.stripe_id
+                )
+                self.stripe_id = stripe_plan['id']
+
+        super(AbstractPlan, self).save(*args, **kwargs)
+
+
+class User(AbstractPlan):
+    class Meta(AbstractPlan.Meta):
+        swappable = 'PLAN_MODEL'
+
+
 class CurrentSubscription(models.Model):
 
     customer = models.OneToOneField(
@@ -610,7 +673,7 @@ class CurrentSubscription(models.Model):
         related_name="current_subscription",
         null=True
     )
-    plan = models.CharField(max_length=100)
+    plan = models.ForeignKey(DEFAULT_PLAN_MODEL)
     quantity = models.IntegerField()
     start = models.DateTimeField()
     # trialing, active, past_due, canceled, or unpaid
@@ -631,7 +694,7 @@ class CurrentSubscription(models.Model):
         return self.amount * self.quantity
 
     def plan_display(self):
-        return PAYMENTS_PLANS[self.plan]["name"]
+        return self.plan.name
 
     def status_display(self):
         return self.status.replace("_", " ").title()
@@ -799,11 +862,11 @@ class InvoiceItem(models.Model):
     proration = models.BooleanField(default=False)
     line_type = models.CharField(max_length=50)
     description = models.CharField(max_length=200, blank=True)
-    plan = models.CharField(max_length=100, blank=True)
+    plan = models.ForeignKey(DEFAULT_PLAN_MODEL)
     quantity = models.IntegerField(null=True)
 
     def plan_display(self):
-        return PAYMENTS_PLANS[self.plan]["name"]
+        return self.plan.name
 
 
 class Charge(StripeObject):
