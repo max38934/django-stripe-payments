@@ -661,7 +661,7 @@ class AbstractPlan(models.Model):
         super(AbstractPlan, self).save(*args, **kwargs)
 
 
-class User(AbstractPlan):
+class Plan(AbstractPlan):
     class Meta(AbstractPlan.Meta):
         swappable = 'PLAN_MODEL'
 
