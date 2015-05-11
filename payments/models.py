@@ -36,7 +36,6 @@ from .utils import (
     convert_tstamp,
     convert_amount_for_db,
     convert_amount_for_api,
-    get_plan_model,
 )
 
 STRIPE_PLAN_MODEL_PATH = getattr(settings, "STRIPE_PLAN_MODEL", "payments.Plan")
@@ -600,7 +599,7 @@ class Customer(StripeObject):
         return Charge.sync_from_stripe_data(data)
 
 
-class AbstractPlan(models.Model):
+class Plan(models.Model):
 
     CURRENCY_CHOICES = (
         ('gbp', 'Pounds'),
@@ -620,10 +619,6 @@ class AbstractPlan(models.Model):
     currency = models.CharField(choices=CURRENCY_CHOICES, max_length=10, default='usd')
     amount = models.DecimalField(max_digits=8, decimal_places=2, default=decimal.Decimal('0.00'))
     interval = models.CharField(max_length=32, choices=INTERVAL_CHOICES, default=MONTHLY)
-
-    class Meta:
-        abstract = True
-        swappable = 'PLAN_MODEL'
 
     def __unicode__(self):
         return unicode(self.name)
@@ -658,12 +653,7 @@ class AbstractPlan(models.Model):
                 )
                 self.stripe_id = stripe_plan['id']
 
-        super(AbstractPlan, self).save(*args, **kwargs)
-
-
-class User(AbstractPlan):
-    class Meta(AbstractPlan.Meta):
-        swappable = 'PLAN_MODEL'
+        super(Plan, self).save(*args, **kwargs)
 
 
 class CurrentSubscription(models.Model):

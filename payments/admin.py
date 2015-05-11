@@ -9,7 +9,8 @@ from .models import (
     EventProcessingException,
     Invoice,
     InvoiceItem,
-    Transfer
+    Transfer,
+    Plan
 )
 from .utils import get_user_model
 
@@ -283,5 +284,16 @@ admin.site.register(
     search_fields=[
         "stripe_id",
         "event__stripe_id"
+    ]
+)
+
+
+admin.site.register(
+    Plan,
+    list_display=[
+        "stripe_id",
+        "name",
+        "amount",
+        "interval",
     ]
 )
