@@ -372,34 +372,30 @@ class Customer(StripeObject):
         cancelled.send(sender=self, stripe_response=sub)
 
     @classmethod
-    def create(cls, user, card=None, plan=None, charge_immediately=True):
+    def create(cls, user, plan=None, charge_immediately=True):
 
-        if card and plan:
-            plan = get_plan_model().objects.get(name=plan).stripe_id
+        if plan:
+            plan = plan.stripe_id
         else:
             plan = None
 
-        trial_end = None
-        if TRIAL_PERIOD_FOR_USER_CALLBACK and plan:
-            trial_days = TRIAL_PERIOD_FOR_USER_CALLBACK(user)
-            trial_end = datetime.datetime.utcnow() + datetime.timedelta(
-                days=trial_days
-            )
-
+        # Create Customer on Stripe side
         stripe_customer = stripe.Customer.create(
             email=user.email,
-            card=card,
             plan=plan,
-            trial_end=trial_end
         )
 
-        if stripe_customer.active_card:
+        #  Get all Customer cards
+        cards = stripe.Customer.retrieve(stripe_customer.stripe_id).sources.all(limit=3, object='card')
+
+        if len(cards['data']):
+            card = cards['data'][0]
             cus = cls.objects.create(
                 user=user,
                 stripe_id=stripe_customer.id,
-                card_fingerprint=stripe_customer.active_card.fingerprint,
-                card_last_4=stripe_customer.active_card.last4,
-                card_kind=stripe_customer.active_card.type
+                card_fingerprint=card.fingerprint,
+                card_last_4=card.last4,
+                card_kind=card.brand
             )
         else:
             cus = cls.objects.create(
@@ -422,11 +418,11 @@ class Customer(StripeObject):
         self.save_card(cu)
 
     def save_card(self, cu=None):
-        cu = cu or self.stripe_customer
-        active_card = cu.active_card
+        cu = cu or stripe.Customer.retrieve(self.stripe_id)
+        active_card = cu.sources.all(limit=3, object='card')['data'][0]
         self.card_fingerprint = active_card.fingerprint
         self.card_last_4 = active_card.last4
-        self.card_kind = active_card.type
+        self.card_kind = active_card.brand
         self.save()
         card_changed.send(sender=self, stripe_response=cu)
 
@@ -492,7 +488,7 @@ class Customer(StripeObject):
         else:
             try:
                 sub_obj = self.current_subscription
-                sub_obj.plan = plan_from_stripe_id(sub.plan.id)
+                sub_obj.plan = get_plan_model().objects.get(stripe_id=sub.plan.id)
                 sub_obj.current_period_start = convert_tstamp(
                     sub.current_period_start
                 )
@@ -509,7 +505,7 @@ class Customer(StripeObject):
             except CurrentSubscription.DoesNotExist:
                 sub_obj = CurrentSubscription.objects.create(
                     customer=self,
-                    plan=plan_from_stripe_id(sub.plan.id),
+                    plan=get_plan_model().objects.get(stripe_id=sub.plan.id),
                     current_period_start=convert_tstamp(
                         sub.current_period_start
                     ),
@@ -540,8 +536,7 @@ class Customer(StripeObject):
             charge_immediately=charge_immediately
         )
 
-    def subscribe(self, plan, quantity=None, trial_days=None,
-                  charge_immediately=True, token=None, coupon=None):
+    def subscribe(self, plan, quantity=None, trial_days=None, charge_immediately=True, token=None, coupon=None):
         if quantity is None:
             if PLAN_QUANTITY_CALLBACK is not None:
                 quantity = PLAN_QUANTITY_CALLBACK(self)
@@ -556,7 +551,7 @@ class Customer(StripeObject):
         if token:
             subscription_params["card"] = token
 
-        subscription_params["plan"] = get_plan_model().objects.get(name=plan).stripe_id
+        subscription_params["plan"] = plan.stripe_id
         subscription_params["quantity"] = quantity
         subscription_params["coupon"] = coupon
         resp = cu.update_subscription(**subscription_params)
