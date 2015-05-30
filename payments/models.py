@@ -309,10 +309,6 @@ class Customer(StripeObject):
         getattr(settings, "AUTH_USER_MODEL", "auth.User"),
         null=True
     )
-    card_fingerprint = models.CharField(max_length=200, blank=True)
-    card_last_4 = models.CharField(max_length=4, blank=True)
-    card_kind = models.CharField(max_length=50, blank=True)
-    date_purged = models.DateTimeField(null=True, editable=False)
 
     objects = CustomerManager()
 
@@ -335,21 +331,23 @@ class Customer(StripeObject):
                 # The exception was raised for another reason, re-raise it
                 raise
         self.user = None
-        self.card_fingerprint = ""
-        self.card_last_4 = ""
-        self.card_kind = ""
-        self.date_purged = timezone.now()
         self.save()
+        self.creditcard_set.update(
+            card_fingerprint='',
+            card_last_4='',
+            card_kind='',
+            exp_month='',
+            exp_year='',
+            date_purged=timezone.now()
+        )
 
     def delete(self, using=None):
         # Only way to delete a customer is to use SQL
         self.purge()
 
     def can_charge(self):
-        return self.card_fingerprint and \
-            self.card_last_4 and \
-            self.card_kind and \
-            self.date_purged is None
+        return self.creditcard_set.filter(date_purged__isnull=True)\
+            .exlude(card_last_4='', card_kind='', exp_month='', exp_year='').exists()
 
     def has_active_subscription(self):
         try:
@@ -386,22 +384,24 @@ class Customer(StripeObject):
         )
 
         #  Get all Customer cards
-        cards = stripe.Customer.retrieve(stripe_customer.stripe_id).sources.all(limit=3, object='card')
+        # cards = stripe.Customer.retrieve(stripe_customer.stripe_id).sources.all(limit=10, object='card')
 
-        if len(cards['data']):
-            card = cards['data'][0]
-            cus = cls.objects.create(
-                user=user,
-                stripe_id=stripe_customer.id,
-                card_fingerprint=card.fingerprint,
-                card_last_4=card.last4,
-                card_kind=card.brand
-            )
-        else:
-            cus = cls.objects.create(
-                user=user,
-                stripe_id=stripe_customer.id,
-            )
+        # if len(cards['data']):
+        #     card = cards['data'][0]
+        #     cus = cls.objects.create(
+        #         user=user,
+        #         stripe_id=stripe_customer.id,
+        #         card_fingerprint=card.fingerprint,
+        #         card_last_4=card.last4,
+        #         card_kind=card.brand
+        #     )
+        # else:
+        cus = cls.objects.create(
+            user=user,
+            stripe_id=stripe_customer.id,
+        )
+
+        cls.sync_customer_cards(stripe_customer)
 
         if plan:
             if stripe_customer.subscription:
@@ -415,16 +415,25 @@ class Customer(StripeObject):
         cu = self.stripe_customer
         cu.card = token
         cu.save()
-        self.save_card(cu)
+        self.sync_customer_cards(cu)
 
-    def save_card(self, cu=None):
-        cu = cu or stripe.Customer.retrieve(self.stripe_id)
-        active_card = cu.sources.all(limit=3, object='card')['data'][0]
-        self.card_fingerprint = active_card.fingerprint
-        self.card_last_4 = active_card.last4
-        self.card_kind = active_card.brand
-        self.save()
-        card_changed.send(sender=self, stripe_response=cu)
+    def sync_customer_cards(self, customer):
+        """
+        Load Customer cards from Stripe
+        """
+        cards = stripe.Customer.retrieve(customer.stripe_id).sources.all(limit=10, object='card')
+        for card in cards:
+            local_card = CreditCard.objects.filter(stripe_id=card['id'])
+            if not local_card.exists():
+                CreditCard.objects.create(
+                    stripe_customer=self,
+                    stripe_id=card['id'],
+                    card_kind=card['type'],
+                    last4=card['last4'],
+                    exp_month=card['exp_month'],
+                    exp_year=card['exp_year'],
+                    card_fingerprint=card['fingerprint']
+                )
 
     def retry_unpaid_invoices(self):
         self.sync_invoices()
@@ -459,9 +468,9 @@ class Customer(StripeObject):
                 self.card_kind = cu.active_card.type
         else:
             updated = True
-            self.card_fingerprint = ""
-            self.card_last_4 = ""
-            self.card_kind = ""
+            # self.card_fingerprint = ""
+            # self.card_last_4 = ""
+            # self.card_kind = ""
 
         if updated:
             self.save()
@@ -559,7 +568,7 @@ class Customer(StripeObject):
         if token:
             # Refetch the stripe customer so we have the updated card info
             cu = self.stripe_customer
-            self.save_card(cu)
+            self.sync_customer_cards(cu)
 
         self.sync_current_subscription(cu)
         if charge_immediately:
@@ -593,6 +602,24 @@ class Customer(StripeObject):
     def record_charge(self, charge_id):
         data = stripe.Charge.retrieve(charge_id)
         return Charge.sync_from_stripe_data(data)
+
+
+class CreditCard(models.Model):
+
+    stripe_customer = models.ForeignKey(Customer)
+    stripe_id = models.CharField(max_length=255)
+    card_fingerprint = models.CharField(max_length=200, blank=True)
+    card_last_4 = models.CharField(max_length=4, blank=True)
+    card_kind = models.CharField(max_length=50, blank=True)
+    exp_month = models.PositiveSmallIntegerField(default=0)
+    exp_year = models.PositiveSmallIntegerField(default=0)
+    date_purged = models.DateTimeField(null=True, editable=False)
+
+    def __unicode__(self):
+        return '%s (%s-%s)' % (self.stripe_customer, self.card_kind, self.last4)
+
+    def get_exp_date(self):
+        return '%s/%s' % (self.exp_month, str(self.exp_year)[2:])
 
 
 class AbstractPlan(models.Model):
