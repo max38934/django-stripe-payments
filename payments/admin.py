@@ -187,6 +187,7 @@ class CurrentSubscriptionInline(admin.TabularInline):
 
 class CreditCardInline(admin.TabularInline):
     model = CreditCard
+    extra = 0
 
 
 def subscription_status(obj):
