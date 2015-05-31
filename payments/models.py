@@ -405,7 +405,7 @@ class Customer(StripeObject):
         self.sync_customer_cards(cus)
 
         if plan:
-            if stripe_customer.subscription:
+            if len(stripe_customer.subscriptions['data']):
                 cus.sync_current_subscription(cu=stripe_customer)
             if charge_immediately:
                 cus.send_invoice()
@@ -418,11 +418,11 @@ class Customer(StripeObject):
         cu.save()
         self.sync_customer_cards(cu)
 
-    def sync_customer_cards(self, customer):
+    def sync_customer_cards(self):
         """
         Load Customer cards from Stripe
         """
-        cards = stripe.Customer.retrieve(customer.stripe_id).sources.all(limit=10, object='card')
+        cards = stripe.Customer.retrieve(self.stripe_id).sources.all(limit=10, object='card')
         for card in cards['data']:
             local_card = CreditCard.objects.filter(stripe_id=card['id'])
             if not local_card.exists():
