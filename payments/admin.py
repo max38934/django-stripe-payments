@@ -10,7 +10,8 @@ from .models import (
     Invoice,
     InvoiceItem,
     Transfer,
-    Plan
+    Plan,
+    CreditCard
 )
 from .utils import get_user_model
 
@@ -184,6 +185,10 @@ class CurrentSubscriptionInline(admin.TabularInline):
     model = CurrentSubscription
 
 
+class CreditCardInline(admin.TabularInline):
+    model = CreditCard
+
+
 def subscription_status(obj):
     return obj.current_subscription.status
 subscription_status.short_description = "Subscription Status"
@@ -195,19 +200,19 @@ admin.site.register(
     list_display=[
         "stripe_id",
         "user",
-        "card_kind",
-        "card_last_4",
         subscription_status
     ],
     list_filter=[
-        "card_kind",
         CustomerHasCardListFilter,
         CustomerSubscriptionStatusListFilter
     ],
     search_fields=[
         "stripe_id",
     ] + user_search_fields(),
-    inlines=[CurrentSubscriptionInline]
+    inlines=[
+        CurrentSubscriptionInline,
+        CreditCardInline
+    ]
 )
 
 

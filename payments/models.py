@@ -370,7 +370,7 @@ class Customer(StripeObject):
         cancelled.send(sender=self, stripe_response=sub)
 
     @classmethod
-    def create(cls, user, plan=None, charge_immediately=True):
+    def create(self, user, token, plan=None, charge_immediately=True):
 
         if plan:
             plan = plan.stripe_id
@@ -381,6 +381,7 @@ class Customer(StripeObject):
         stripe_customer = stripe.Customer.create(
             email=user.email,
             plan=plan,
+            source=token
         )
 
         #  Get all Customer cards
@@ -396,12 +397,12 @@ class Customer(StripeObject):
         #         card_kind=card.brand
         #     )
         # else:
-        cus = cls.objects.create(
+        cus = self.objects.create(
             user=user,
             stripe_id=stripe_customer.id,
         )
 
-        cls.sync_customer_cards(stripe_customer)
+        self.sync_customer_cards(cus)
 
         if plan:
             if stripe_customer.subscription:
@@ -422,17 +423,16 @@ class Customer(StripeObject):
         Load Customer cards from Stripe
         """
         cards = stripe.Customer.retrieve(customer.stripe_id).sources.all(limit=10, object='card')
-        for card in cards:
+        for card in cards['data']:
             local_card = CreditCard.objects.filter(stripe_id=card['id'])
             if not local_card.exists():
                 CreditCard.objects.create(
                     stripe_customer=self,
                     stripe_id=card['id'],
-                    card_kind=card['type'],
+                    card_kind=card['brand'],
                     last4=card['last4'],
                     exp_month=card['exp_month'],
-                    exp_year=card['exp_year'],
-                    card_fingerprint=card['fingerprint']
+                    exp_year=card['exp_year']
                 )
 
     def retry_unpaid_invoices(self):
@@ -604,12 +604,11 @@ class Customer(StripeObject):
         return Charge.sync_from_stripe_data(data)
 
 
-class CreditCard(models.Model):
+class CreditCard(StripeObject):
 
     stripe_customer = models.ForeignKey(Customer)
-    stripe_id = models.CharField(max_length=255)
     card_fingerprint = models.CharField(max_length=200, blank=True)
-    card_last_4 = models.CharField(max_length=4, blank=True)
+    last4 = models.CharField(max_length=4, blank=True)
     card_kind = models.CharField(max_length=50, blank=True)
     exp_month = models.PositiveSmallIntegerField(default=0)
     exp_year = models.PositiveSmallIntegerField(default=0)
