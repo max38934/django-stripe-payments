@@ -687,7 +687,7 @@ class Plan(AbstractPlan):
         swappable = 'PLAN_MODEL'
 
 
-class CurrentSubscription(models.Model):
+class CurrentSubscription(StripeObject):
 
     customer = models.OneToOneField(
         Customer,
@@ -708,7 +708,6 @@ class CurrentSubscription(models.Model):
     trial_start = models.DateTimeField(blank=True, null=True)
     amount = models.DecimalField(decimal_places=2, max_digits=9)
     currency = models.CharField(max_length=10, default="usd")
-    created_at = models.DateTimeField(default=timezone.now)
 
     @property
     def total_amount(self):
@@ -734,6 +733,14 @@ class CurrentSubscription(models.Model):
             return False
 
         return True
+
+    def update(self, plan):
+        customer = self.customer.stripe_customer
+        subscription = customer.subscriptions.retrieve(self.stripe_id)
+        subscription.plan = plan.name
+        subscription.save()
+        self.plan = plan
+        self.save()
 
     def delete(self, using=None):  # pylint: disable=E1002
         """
