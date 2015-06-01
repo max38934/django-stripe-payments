@@ -402,7 +402,7 @@ class Customer(StripeObject):
             stripe_id=stripe_customer.id,
         )
 
-        self.sync_customer_cards(cus)
+        self.sync_customer_cards()
 
         if plan:
             if len(stripe_customer.subscriptions['data']):
@@ -416,7 +416,7 @@ class Customer(StripeObject):
         cu = self.stripe_customer
         cu.card = token
         cu.save()
-        self.sync_customer_cards(cu)
+        self.sync_customer_cards()
 
     def sync_customer_cards(self):
         """
@@ -424,8 +424,14 @@ class Customer(StripeObject):
         """
         cards = stripe.Customer.retrieve(self.stripe_id).sources.all(limit=10, object='card')
         for card in cards['data']:
-            local_card = CreditCard.objects.filter(stripe_id=card['id'])
-            if not local_card.exists():
+            local_card = CreditCard.objects.filter(stripe_customer=self, card_kind=card['brand'], last4=card['last4'])
+            if local_card.exists():
+                local_card.update(
+                    stripe_id=card['id'],
+                    exp_month=card['exp_month'],
+                    exp_year=card['exp_year']
+                )
+            else:
                 CreditCard.objects.create(
                     stripe_customer=self,
                     stripe_id=card['id'],
@@ -488,51 +494,52 @@ class Customer(StripeObject):
 
     def sync_current_subscription(self, cu=None):
         cu = cu or self.stripe_customer
-        sub = getattr(cu, "subscription", None)
-        if sub is None:
+        subs = getattr(cu, "subscriptions", None)
+        if subs is None:
             try:
                 self.current_subscription.delete()
             except CurrentSubscription.DoesNotExist:
                 pass
         else:
-            try:
-                sub_obj = self.current_subscription
-                sub_obj.plan = get_plan_model().objects.get(stripe_id=sub.plan.id)
-                sub_obj.current_period_start = convert_tstamp(
-                    sub.current_period_start
-                )
-                sub_obj.current_period_end = convert_tstamp(
-                    sub.current_period_end
-                )
-                sub_obj.amount = convert_amount_for_db(sub.plan.amount, sub.plan.currency)
-                sub_obj.currency = sub.plan.currency
-                sub_obj.status = sub.status
-                sub_obj.cancel_at_period_end = sub.cancel_at_period_end
-                sub_obj.start = convert_tstamp(sub.start)
-                sub_obj.quantity = sub.quantity
-                sub_obj.save()
-            except CurrentSubscription.DoesNotExist:
-                sub_obj = CurrentSubscription.objects.create(
-                    customer=self,
-                    plan=get_plan_model().objects.get(stripe_id=sub.plan.id),
-                    current_period_start=convert_tstamp(
+            for sub in subs['data']:
+                try:
+                    sub_obj = self.current_subscription
+                    sub_obj.plan = get_plan_model().objects.get(stripe_id=sub.plan.id)
+                    sub_obj.current_period_start = convert_tstamp(
                         sub.current_period_start
-                    ),
-                    current_period_end=convert_tstamp(
+                    )
+                    sub_obj.current_period_end = convert_tstamp(
                         sub.current_period_end
-                    ),
-                    amount=convert_amount_for_db(sub.plan.amount, sub.plan.currency),
-                    currency=sub.plan.currency,
-                    status=sub.status,
-                    cancel_at_period_end=sub.cancel_at_period_end,
-                    start=convert_tstamp(sub.start),
-                    quantity=sub.quantity
-                )
+                    )
+                    sub_obj.amount = convert_amount_for_db(sub.plan.amount, sub.plan.currency)
+                    sub_obj.currency = sub.plan.currency
+                    sub_obj.status = sub.status
+                    sub_obj.cancel_at_period_end = sub.cancel_at_period_end
+                    sub_obj.start = convert_tstamp(sub.start)
+                    sub_obj.quantity = sub.quantity
+                    sub_obj.save()
+                except CurrentSubscription.DoesNotExist:
+                    sub_obj = CurrentSubscription.objects.create(
+                        customer=self,
+                        plan=get_plan_model().objects.get(stripe_id=sub.plan.id),
+                        current_period_start=convert_tstamp(
+                            sub.current_period_start
+                        ),
+                        current_period_end=convert_tstamp(
+                            sub.current_period_end
+                        ),
+                        amount=convert_amount_for_db(sub.plan.amount, sub.plan.currency),
+                        currency=sub.plan.currency,
+                        status=sub.status,
+                        cancel_at_period_end=sub.cancel_at_period_end,
+                        start=convert_tstamp(sub.start),
+                        quantity=sub.quantity
+                    )
 
-            if sub.trial_start and sub.trial_end:
-                sub_obj.trial_start = convert_tstamp(sub.trial_start)
-                sub_obj.trial_end = convert_tstamp(sub.trial_end)
-                sub_obj.save()
+                if sub.trial_start and sub.trial_end:
+                    sub_obj.trial_start = convert_tstamp(sub.trial_start)
+                    sub_obj.trial_end = convert_tstamp(sub.trial_end)
+                    sub_obj.save()
 
             return sub_obj
 
