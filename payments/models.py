@@ -402,7 +402,7 @@ class Customer(StripeObject):
             stripe_id=stripe_customer.id,
         )
 
-        self.sync_customer_cards()
+        self.sync_customer_cards(cus)
 
         if plan:
             if len(stripe_customer.subscriptions['data']):
@@ -504,6 +504,7 @@ class Customer(StripeObject):
             for sub in subs['data']:
                 try:
                     sub_obj = self.current_subscription
+                    sub_obj.stripe_id = sub.id
                     sub_obj.plan = get_plan_model().objects.get(stripe_id=sub.plan.id)
                     sub_obj.current_period_start = convert_tstamp(
                         sub.current_period_start
@@ -521,6 +522,7 @@ class Customer(StripeObject):
                 except CurrentSubscription.DoesNotExist:
                     sub_obj = CurrentSubscription.objects.create(
                         customer=self,
+                        stripe_id=sub.id,
                         plan=get_plan_model().objects.get(stripe_id=sub.plan.id),
                         current_period_start=convert_tstamp(
                             sub.current_period_start
@@ -744,7 +746,7 @@ class CurrentSubscription(StripeObject):
     def update(self, plan):
         customer = self.customer.stripe_customer
         subscription = customer.subscriptions.retrieve(self.stripe_id)
-        subscription.plan = plan.name
+        subscription.plan = plan.stripe_id
         subscription.save()
         self.plan = plan
         self.save()
