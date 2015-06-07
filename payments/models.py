@@ -20,7 +20,6 @@ from jsonfield.fields import JSONField
 from .managers import CustomerManager, ChargeManager, TransferManager
 from .settings import (
     INVOICE_FROM_EMAIL,
-    plan_from_stripe_id,
     SEND_EMAIL_RECEIPTS,
     TRIAL_PERIOD_FOR_USER_CALLBACK,
     PLAN_QUANTITY_CALLBACK
@@ -334,10 +333,10 @@ class Customer(StripeObject):
         self.save()
         self.creditcard_set.update(
             card_fingerprint='',
-            card_last_4='',
+            last4='',
             card_kind='',
-            exp_month='',
-            exp_year='',
+            exp_month=0,
+            exp_year=0,
             date_purged=timezone.now()
         )
 
@@ -347,7 +346,7 @@ class Customer(StripeObject):
 
     def can_charge(self):
         return self.creditcard_set.filter(date_purged__isnull=True)\
-            .exlude(card_last_4='', card_kind='', exp_month='', exp_year='').exists()
+            .exlude(last4='', card_kind='', exp_month='', exp_year='').exists()
 
     def has_active_subscription(self):
         try:
@@ -393,7 +392,7 @@ class Customer(StripeObject):
         #         user=user,
         #         stripe_id=stripe_customer.id,
         #         card_fingerprint=card.fingerprint,
-        #         card_last_4=card.last4,
+        #         last4=card.last4,
         #         card_kind=card.brand
         #     )
         # else:
@@ -547,9 +546,7 @@ class Customer(StripeObject):
 
     def update_plan_quantity(self, quantity, charge_immediately=False):
         self.subscribe(
-            plan=plan_from_stripe_id(
-                self.stripe_customer.subscription.plan.id
-            ),
+            plan=get_plan_model().objects.get(stripe_id=self.stripe_customer.subscription.plan.id),
             quantity=quantity,
             charge_immediately=charge_immediately
         )
@@ -621,6 +618,7 @@ class CreditCard(StripeObject):
     card_kind = models.CharField(max_length=50, blank=True)
     exp_month = models.PositiveSmallIntegerField(default=0)
     exp_year = models.PositiveSmallIntegerField(default=0)
+    # default = models.BooleanField(default=False)
     date_purged = models.DateTimeField(null=True, editable=False)
 
     def __unicode__(self):
@@ -840,9 +838,9 @@ class Invoice(models.Model):
             period_start = convert_tstamp(item["period"], "start")
 
             if item.get("plan"):
-                plan = plan_from_stripe_id(item["plan"]["id"])
+                plan = get_plan_model().objects.get(stripe_id=item["plan"]["id"])
             else:
-                plan = ""
+                plan = None
 
             inv_item, inv_item_created = invoice.items.get_or_create(
                 stripe_id=item["id"],
@@ -963,14 +961,14 @@ class Charge(StripeObject):
         invoice_id = data.get("invoice", None)
         if obj.customer.invoices.filter(stripe_id=invoice_id).exists():
             obj.invoice = obj.customer.invoices.get(stripe_id=invoice_id)
-        obj.card_last_4 = data["card"]["last4"]
-        obj.card_kind = data["card"]["type"]
+        obj.card_last_4 = data["source"]["last4"]
+        obj.card_kind = data["source"]["brand"]
         obj.currency = data["currency"]
         obj.amount = convert_amount_for_db(data["amount"], obj.currency)
         obj.paid = data["paid"]
         obj.refunded = data["refunded"]
         obj.captured = data["captured"]
-        obj.fee = convert_amount_for_db(data["fee"])  # assume in usd only
+        # obj.fee = convert_amount_for_db(data["fee"])  # assume in usd only
         obj.disputed = data["dispute"] is not None
         obj.charge_created = convert_tstamp(data, "created")
         if data.get("description"):
