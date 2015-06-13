@@ -137,6 +137,7 @@ class Event(StripeObject):
             "customer.created",
             "customer.updated",
             "customer.deleted",
+            "customer.source.created",
             "customer.subscription.created",
             "customer.subscription.updated",
             "customer.subscription.deleted",
@@ -178,6 +179,12 @@ class Event(StripeObject):
                     self,
                     self.message["data"]["object"]
                 )
+            elif self.kind.startswith("customer.source."):
+                try:
+                    if self.message['data']['object']['object'] == 'card':
+                        self.customer.sync_customer_cards()
+                except KeyError:
+                    pass
             elif self.kind.startswith("customer.subscription."):
                 if self.customer:
                     self.customer.sync_current_subscription()
