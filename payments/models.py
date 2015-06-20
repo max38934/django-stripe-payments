@@ -210,6 +210,16 @@ class Event(StripeObject):
         if signal:
             return signal.send(sender=Event, event=self)
 
+    @property
+    def invoice_amount(self):
+        if self.kind.startswith("invoice."):
+            try:
+                cents = self.message['data']['object']['total']
+            except KeyError:
+                cents = 0
+            return decimal.Decimal(cents) / 100
+        return 0
+
 
 class Transfer(StripeObject):
     # pylint: disable=C0301
